@@ -8,6 +8,7 @@ import (
 	"github.com/metacubex/mihomo/common/lru"
 	"github.com/metacubex/mihomo/component/fakeip"
 	"github.com/metacubex/mihomo/component/resolver"
+	"github.com/metacubex/mihomo/component/trie"
 	C "github.com/metacubex/mihomo/constant"
 	icontext "github.com/metacubex/mihomo/context"
 	"github.com/metacubex/mihomo/log"
@@ -146,7 +147,7 @@ func withMapping(mapping *lru.LruCache[netip.Addr, string]) middleware {
 	}
 }
 
-func withFakeIP(skipper *fakeip.Skipper, fakePool *fakeip.Pool, fakePool6 *fakeip.Pool, fakeIPTTL int) middleware {
+func withFakeIP(skipper *fakeip.Skipper, fakePool *fakeip.Pool, fakePool6 *fakeip.Pool, fakeIPTTL int, svcb *trie.DomainTrie[[]string]) middleware {
 	return func(next handler) handler {
 		return func(ctx *icontext.DNSContext, r *D.Msg) (*D.Msg, error) {
 			q := r.Question[0]
@@ -177,6 +178,9 @@ func withFakeIP(skipper *fakeip.Skipper, fakePool *fakeip.Pool, fakePool6 *fakei
 					AAAA: ip.AsSlice(),
 				}
 			case D.TypeSVCB, D.TypeHTTPS:
+				if alpn, ok := lookupSVCBAlpn(svcb, host); ok {
+					return buildSVCBMsg(r, q, alpn), nil
+				}
 				return handleMsgWithEmptyAnswer(r), nil
 			default:
 				return next(ctx, r)
@@ -194,6 +198,49 @@ func withFakeIP(skipper *fakeip.Skipper, fakePool *fakeip.Pool, fakePool6 *fakei
 			return msg, nil
 		}
 	}
+}
+
+// svcbAnswerTTL 合成记录的 TTL；配置改动后客户端最多缓存这么久
+const svcbAnswerTTL = 60
+
+// lookupSVCBAlpn 按域名查合成的 alpn 列表
+func lookupSVCBAlpn(svcb *trie.DomainTrie[[]string], host string) ([]string, bool) {
+	if svcb == nil {
+		return nil, false
+	}
+	node := svcb.Search(host)
+	if node == nil {
+		return nil, false
+	}
+	alpn := node.Data()
+	if len(alpn) == 0 {
+		return nil, false
+	}
+	return alpn, true
+}
+
+// buildSVCBMsg 合成只带 alpn 的 HTTPS/SVCB 应答。
+// 故意不带 ipv4hint/ipv6hint：hint 是真实 IP，客户端会直接连它绕开 fake-ip 的域名映射
+func buildSVCBMsg(r *D.Msg, q D.Question, alpn []string) *D.Msg {
+	hdr := D.RR_Header{Name: q.Name, Rrtype: q.Qtype, Class: D.ClassINET, Ttl: svcbAnswerTTL}
+	svcb := D.SVCB{
+		Hdr:      hdr,
+		Priority: 1, // ServiceMode，Target 为 "." 表示服务就在域名本身
+		Target:   ".",
+		Value:    []D.SVCBKeyValue{&D.SVCBAlpn{Alpn: alpn}},
+	}
+
+	msg := r.Copy()
+	if q.Qtype == D.TypeHTTPS {
+		msg.Answer = []D.RR{&D.HTTPS{SVCB: svcb}}
+	} else {
+		msg.Answer = []D.RR{&svcb}
+	}
+	msg.SetRcode(r, D.RcodeSuccess)
+	msg.Authoritative = true
+	msg.RecursionAvailable = true
+
+	return msg
 }
 
 func withResolver(resolver resolver.Resolver, ipv6 bool) handler {
@@ -238,7 +285,7 @@ func newHandler(resolver resolver.Resolver, mapper *ResolverEnhancer) handler {
 	}
 
 	if mapper.mode == C.DNSFakeIP {
-		middlewares = append(middlewares, withFakeIP(mapper.fakeIPSkipper, mapper.fakeIPPool, mapper.fakeIPPool6, mapper.fakeIPTTL))
+		middlewares = append(middlewares, withFakeIP(mapper.fakeIPSkipper, mapper.fakeIPPool, mapper.fakeIPPool6, mapper.fakeIPTTL, mapper.fakeIPSvcb))
 	}
 
 	if mapper.mode != C.DNSNormal {

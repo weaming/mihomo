@@ -271,6 +271,7 @@ func updateDNS(c *config.DNS, generalIPv6 bool) {
 		FakeIPPool6:   c.FakeIPPool6,
 		FakeIPSkipper: c.FakeIPSkipper,
 		FakeIPTTL:     c.FakeIPTTL,
+		FakeIPSvcb:    c.FakeIPSvcb,
 		UseHosts:      c.UseHosts,
 	})
 

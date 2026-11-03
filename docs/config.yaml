@@ -299,6 +299,14 @@ dns:
   # 配置fakeip查询返回的TTL，非必要情况下请勿修改
   fake-ip-ttl: 1
 
+  # 为指定域名合成 HTTPS/SVCB 记录（仅 fake-ip 模式生效），让客户端不经 Alt-Svc 也能得知该域支持 HTTP/3。
+  # 合成的记录只带 alpn，不带 ipv4hint/ipv6hint——hint 是真实 IP，客户端会直连它绕过 fake-ip 的域名映射。
+  # 域名语法与 fake-ip-filter 相同（+.example.com 覆盖裸域与子域）；务必只配置 QUIC 路径确实可达的域名，
+  # 否则客户端会先试 h3 再回落，反而变慢。
+  # fake-ip-svcb:
+  #   "+.twimg.com": ["h3", "h2"]
+  #   "video.example.com": ["h3"]
+
   # use-hosts: true # 查询 hosts
 
   # 配置后面的nameserver、fallback和nameserver-policy向dns服务器的连接过程是否遵守遵守rules规则

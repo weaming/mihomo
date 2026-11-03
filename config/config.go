@@ -168,6 +168,7 @@ type DNS struct {
 	FakeIPPool6           *fakeip.Pool
 	FakeIPSkipper         *fakeip.Skipper
 	FakeIPTTL             int
+	FakeIPSvcb            *trie.DomainTrie[[]string]
 	NameServerPolicy      []dns.Policy
 	ProxyServerNameserver []dns.NameServer
 	ProxyServerPolicy     []dns.Policy
@@ -238,6 +239,7 @@ type RawDNS struct {
 	FakeIPFilter                 []string                            `yaml:"fake-ip-filter" json:"fake-ip-filter"`
 	FakeIPFilterMode             C.FilterMode                        `yaml:"fake-ip-filter-mode" json:"fake-ip-filter-mode"`
 	FakeIPTTL                    int                                 `yaml:"fake-ip-ttl" json:"fake-ip-ttl"`
+	FakeIPSvcb                   map[string][]string                 `yaml:"fake-ip-svcb" json:"fake-ip-svcb"`
 	DefaultNameserver            []string                            `yaml:"default-nameserver" json:"default-nameserver"`
 	CacheAlgorithm               string                              `yaml:"cache-algorithm" json:"cache-algorithm"`
 	CacheMaxSize                 int                                 `yaml:"cache-max-size" json:"cache-max-size"`
@@ -1504,6 +1506,23 @@ func parseDNS(rawCfg *RawConfig, ruleProviders map[string]P.RuleProvider) (*DNS,
 		if !dnsCfg.FakeIPRange6.Addr().Is6() {
 			return nil, errors.New("dns.fake-ip-range6 must be a IPv6 prefix")
 		}
+	}
+
+	if cfg.EnhancedMode == C.DNSFakeIP {
+		if len(cfg.FakeIPSvcb) != 0 {
+			svcb := trie.New[[]string]()
+			for domain, alpn := range cfg.FakeIPSvcb {
+				if len(alpn) == 0 {
+					return nil, fmt.Errorf("dns.fake-ip-svcb[%q] should have at least one alpn", domain)
+				}
+				if err := svcb.Insert(domain, alpn); err != nil {
+					return nil, fmt.Errorf("dns.fake-ip-svcb[%q]: %w", domain, err)
+				}
+			}
+			dnsCfg.FakeIPSvcb = svcb
+		}
+	} else if len(cfg.FakeIPSvcb) != 0 {
+		log.Warnln("dns.fake-ip-svcb only works with fake-ip mode, ignored")
 	}
 
 	if cfg.EnhancedMode == C.DNSFakeIP {

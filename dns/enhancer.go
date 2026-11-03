@@ -6,6 +6,7 @@ import (
 
 	"github.com/metacubex/mihomo/common/lru"
 	"github.com/metacubex/mihomo/component/fakeip"
+	"github.com/metacubex/mihomo/component/trie"
 	C "github.com/metacubex/mihomo/constant"
 )
 
@@ -16,6 +17,7 @@ type ResolverEnhancer struct {
 	fakeIPPool6   *fakeip.Pool
 	fakeIPSkipper *fakeip.Skipper
 	fakeIPTTL     int
+	fakeIPSvcb    *trie.DomainTrie[[]string]
 	mapping       *lru.LruCache[netip.Addr, string]
 	useHosts      bool
 }
@@ -165,6 +167,7 @@ type EnhancerConfig struct {
 	FakeIPPool6   *fakeip.Pool
 	FakeIPSkipper *fakeip.Skipper
 	FakeIPTTL     int
+	FakeIPSvcb    *trie.DomainTrie[[]string]
 	UseHosts      bool
 }
 
@@ -182,6 +185,7 @@ func NewEnhancer(cfg EnhancerConfig) *ResolverEnhancer {
 		}
 		e.fakeIPSkipper = cfg.FakeIPSkipper
 		e.fakeIPTTL = cfg.FakeIPTTL
+		e.fakeIPSvcb = cfg.FakeIPSvcb
 		if e.fakeIPTTL < 1 {
 			e.fakeIPTTL = 1
 		}
